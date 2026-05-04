@@ -7,6 +7,7 @@ import axios, { AxiosResponse } from 'axios'
 import crypto from 'crypto'
 import { Account, Provider } from '../../store/types'
 import { storeManager } from '../../store/store'
+import { getProxyConfig } from '../../utils/proxy'
 import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import FormData from 'form-data'
@@ -129,6 +130,7 @@ export class GLMAdapter {
 
     console.log('[GLM] Refreshing Token...')
     const sign = generateSign()
+    const proxyConfig = getProxyConfig()
     const response = await axios.post(
       `${GLM_API_BASE}/user-api/user/refresh`,
       {},
@@ -144,6 +146,7 @@ export class GLMAdapter {
         },
         timeout: 15000,
         validateStatus: () => true,
+        ...proxyConfig,
       }
     )
 

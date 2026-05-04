@@ -1,20 +1,10 @@
 import axios, { AxiosError } from 'axios'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import { getBuiltinProvider } from './builtin'
+import { getProxyConfig } from '../utils/proxy'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
 const CHECK_TIMEOUT = 15000
-
-// 获取系统代理配置
-function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
-  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
-  if (proxyUrl) {
-    console.log('[Proxy] Using proxy:', proxyUrl)
-    return new HttpsProxyAgent(proxyUrl)
-  }
-  return undefined
-}
 
 export interface TokenCheckResult {
   valid: boolean
@@ -56,13 +46,20 @@ export class ProviderChecker {
     
     try {
       const checkUrl = `${config.apiEndpoint.replace('/api', '')}${config.tokenCheckEndpoint || '/health'}`
+      const proxyConfig = getProxyConfig()
+      
+      console.log('[ProviderChecker] Checking provider:', config.id)
+      console.log('[ProviderChecker] Check URL:', checkUrl)
       
       const response = await axios({
         method: 'GET',
         url: checkUrl,
         timeout: CHECK_TIMEOUT,
         validateStatus: () => true,
+        ...proxyConfig,
       })
+      
+      console.log('[ProviderChecker] Response status:', response.status)
       
       const latency = Date.now() - startTime
       
@@ -231,13 +228,12 @@ export class ProviderChecker {
         'X-Client-Version': '2.0.0',
       }
       
-      const httpsAgent = getHttpsProxyAgent()
+      const proxyConfig = getProxyConfig()
       const response = await axios.post(url, {}, {
         headers,
         timeout: CHECK_TIMEOUT,
         validateStatus: () => true,
-        proxy: false,
-        httpsAgent,
+        ...proxyConfig,
       })
       
       console.log('[DeepSeek] Response status:', response.status)
@@ -274,6 +270,7 @@ export class ProviderChecker {
       console.log('[GLM] Validating Token:', refreshToken.substring(0, 20) + '...')
       
       const sign = await this.generateGLMSignV2()
+      const proxyConfig = getProxyConfig()
       
       const response = await axios.post(
         'https://chatglm.cn/chatglm/user-api/user/refresh',
@@ -312,6 +309,7 @@ export class ProviderChecker {
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          ...proxyConfig,
         }
       )
       
@@ -369,6 +367,7 @@ export class ProviderChecker {
     try {
       console.log('[Kimi] Validating Token:', token.substring(0, 20) + '...')
       
+      const proxyConfig = getProxyConfig()
       const response = await axios.post(
         'https://www.kimi.com/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription',
         {},
@@ -383,6 +382,7 @@ export class ProviderChecker {
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          ...proxyConfig,
         }
       )
       
@@ -469,6 +469,7 @@ export class ProviderChecker {
       const fullUri = `/v1/api/user/device/register?${queryParams}`
       const yy = crypto.createHash('md5').update(`${encodeURIComponent(fullUri)}_${dataJson}${crypto.createHash('md5').update(unix).digest('hex')}ooui`).digest('hex')
       
+      const proxyConfig = getProxyConfig()
       const response = await axios.post(
         `https://agent.minimaxi.com${fullUri}`,
         { uuid },
@@ -496,6 +497,7 @@ export class ProviderChecker {
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          ...proxyConfig,
         }
       )
       
@@ -531,6 +533,7 @@ export class ProviderChecker {
 
   private static async checkQwenToken(ticket: string): Promise<TokenCheckResult> {
     try {
+      const proxyConfig = getProxyConfig()
       const response = await axios.post(
         'https://chat2-api.qianwen.com/api/v2/session/page/list',
         {},
@@ -554,6 +557,7 @@ export class ProviderChecker {
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          ...proxyConfig,
         }
       )
       
@@ -580,6 +584,7 @@ export class ProviderChecker {
 
   private static async checkQwenAiToken(token: string): Promise<TokenCheckResult> {
     try {
+      const proxyConfig = getProxyConfig()
       const response = await axios.get(
         'https://chat.qwen.ai/api/v2/user',
         {
@@ -591,6 +596,7 @@ export class ProviderChecker {
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          ...proxyConfig,
         }
       )
 
@@ -652,12 +658,14 @@ export class ProviderChecker {
         headers['Authorization'] = `Bearer ${credentials.apiKey}`
       }
       
+      const proxyConfig = getProxyConfig()
       const response = await axios({
         method: config.tokenCheckMethod || 'GET',
         url: `${config.apiEndpoint.replace('/api', '')}${config.tokenCheckEndpoint}`,
         headers,
         timeout: CHECK_TIMEOUT,
         validateStatus: () => true,
+        ...proxyConfig,
       })
       
       if (response.status >= 200 && response.status < 300) {
@@ -757,10 +765,12 @@ export class ProviderChecker {
         ...(builtinConfig.modelsApiHeaders || builtinConfig.headers),
       }
 
+      const proxyConfig = getProxyConfig()
       const response = await axios.get(builtinConfig.modelsApiEndpoint, {
         headers,
         timeout: CHECK_TIMEOUT,
         validateStatus: () => true,
+        ...proxyConfig,
       })
 
       if (response.status !== 200) {

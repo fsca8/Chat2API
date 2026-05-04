@@ -4,9 +4,9 @@
  */
 
 import axios from 'axios'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import { shell } from 'electron'
 import { BaseOAuthAdapter } from './base'
+import { getProxyConfig } from '../../utils/proxy'
 import {
   OAuthResult,
   OAuthOptions,
@@ -17,15 +17,6 @@ import {
 } from '../types'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com'
-
-// 获取系统代理配置
-function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
-  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
-  if (proxyUrl) {
-    return new HttpsProxyAgent(proxyUrl)
-  }
-  return undefined
-}
 
 const FAKE_HEADERS = {
   'Accept': '*/*',
@@ -177,13 +168,12 @@ export class DeepSeekAdapter extends BaseOAuthAdapter {
       console.log('[DeepSeek OAuth] Headers:', JSON.stringify(headers, null, 2))
       console.log('[DeepSeek OAuth] ================================================')
       
-      const httpsAgent = getHttpsProxyAgent()
+      const httpsAgent = getProxyConfig()
       const response = await axios.post(url, {}, {
         headers,
         timeout: 15000,
         validateStatus: () => true,
-        proxy: false,
-        httpsAgent,
+        ...httpsAgent,
       })
       
       console.log('[DeepSeek OAuth] ========== Validate Token Response ==========')

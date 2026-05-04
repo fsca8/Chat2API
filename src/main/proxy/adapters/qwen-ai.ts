@@ -8,6 +8,7 @@ import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
+import { getProxyConfig } from '../../utils/proxy'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
@@ -56,6 +57,7 @@ interface ChatCompletionRequest {
   temperature?: number
   enable_thinking?: boolean
   thinking_budget?: number
+  web_search?: boolean
   chatId?: string
 }
 
@@ -78,6 +80,7 @@ export class QwenAiAdapter {
     timeout: 120000,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
+    ...getProxyConfig(),
   })
 
   constructor(provider: Provider, account: Account) {
@@ -293,13 +296,23 @@ export class QwenAiAdapter {
       ? forceThinking 
       : request.enable_thinking === true
     
+    // Determine if web search should be enabled
+    // Priority: explicit web_search parameter > model name detection
+    const modelForDetection = request.originalModel || request.model
+    const modelLowerForSearch = modelForDetection.toLowerCase()
+    let enableWebSearch = !!request.web_search
+    if (!enableWebSearch && modelLowerForSearch.includes('search')) {
+      enableWebSearch = true
+      console.log('[QwenAI] Web search enabled (from model name)')
+    }
+    
     const featureConfig: Record<string, any> = {
       thinking_enabled: shouldEnableThinking,
       output_schema: 'phase',
       research_mode: 'normal',
       auto_thinking: shouldEnableThinking,
       thinking_format: 'summary',
-      auto_search: false, // Default to disable auto search
+      auto_search: enableWebSearch,
     }
 
     if (request.thinking_budget) {

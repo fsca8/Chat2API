@@ -7,21 +7,12 @@
  */
 
 import axios, { AxiosResponse } from 'axios'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import { getDeepSeekHash } from '../../lib/challenge'
+import { getProxyConfig } from '../../utils/proxy'
 import { Account, Provider } from '../store/types'
 import { storeManager } from '../store/store'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
-
-// 获取系统代理配置
-function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
-  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
-  if (proxyUrl) {
-    return new HttpsProxyAgent(proxyUrl)
-  }
-  return undefined
-}
 
 const FAKE_HEADERS = {
   'Accept': '*/*',
@@ -161,7 +152,7 @@ export class DeepSeekAdapter {
     }
 
     const token = await this.acquireToken()
-    const httpsAgent = getHttpsProxyAgent()
+    const proxyConfig = getProxyConfig()
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat_session/create`,
       {},
@@ -173,8 +164,7 @@ export class DeepSeekAdapter {
         },
         timeout: 15000,
         validateStatus: () => true,
-        proxy: false,
-        httpsAgent,
+        ...proxyConfig,
       }
     )
 
@@ -195,7 +185,7 @@ export class DeepSeekAdapter {
   async deleteSession(sessionId: string): Promise<boolean> {
     try {
       const token = await this.acquireToken()
-      const httpsAgent = getHttpsProxyAgent()
+      const proxyConfig = getProxyConfig()
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete`,
         { chat_session_id: sessionId },
@@ -229,7 +219,7 @@ export class DeepSeekAdapter {
 
   private async getChallenge(targetPath: string): Promise<ChallengeResponse> {
     const token = await this.acquireToken()
-    const httpsAgent = getHttpsProxyAgent()
+    const proxyConfig = getProxyConfig()
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/create_pow_challenge`,
       { target_path: targetPath },
@@ -240,8 +230,7 @@ export class DeepSeekAdapter {
         },
         timeout: 15000,
         validateStatus: () => true,
-        proxy: false,
-        httpsAgent,
+        ...proxyConfig,
       }
     )
 
@@ -418,7 +407,7 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
-    const httpsAgent = getHttpsProxyAgent()
+    const proxyConfig = getProxyConfig()
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
@@ -439,8 +428,7 @@ ${message.content || ''}
         timeout: 120000,
         validateStatus: () => true,
         responseType: 'stream',
-        proxy: false,
-        httpsAgent,
+        ...proxyConfig,
       }
     )
 
@@ -450,7 +438,7 @@ ${message.content || ''}
   async deleteAllChats(): Promise<boolean> {
     try {
       const token = await this.acquireToken()
-      const httpsAgent = getHttpsProxyAgent()
+      const proxyConfig = getProxyConfig()
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete_all`,
         {},

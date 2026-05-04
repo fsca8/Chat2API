@@ -9,6 +9,7 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
+import { getProxyConfig } from '../../utils/proxy'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
@@ -243,6 +244,7 @@ export class ZaiAdapter {
       },
     }
     
+    const proxyConfig = getProxyConfig()
     const response = await axios.post(
       `${ZAI_API_BASE}/api/v1/chats/new`,
       requestBody,
@@ -251,13 +253,13 @@ export class ZaiAdapter {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           'X-FE-Version': X_FE_VERSION,
-          'Cookie': `token=${token}`,
           Origin: ZAI_API_BASE,
           Referer: `${ZAI_API_BASE}/`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
         },
         timeout: 15000,
         validateStatus: () => true,
+        ...proxyConfig,
       }
     )
 
@@ -274,6 +276,7 @@ export class ZaiAdapter {
     try {
       const token = await this.ensureToken()
       
+      const proxyConfig = getProxyConfig()
       const response = await axios.delete(
         `${ZAI_API_BASE}/api/v1/chats/${chatId}`,
         {
@@ -284,6 +287,8 @@ export class ZaiAdapter {
           },
           timeout: 15000,
           validateStatus: () => true,
+          proxy: false,
+          httpsAgent,
         }
       )
 
@@ -301,6 +306,7 @@ export class ZaiAdapter {
       
       console.log('[Z.ai] Deleting all chats...')
       
+      const proxyConfig = getProxyConfig()
       const response = await axios.delete(
         `${ZAI_API_BASE}/api/v1/chats/`,
         {
@@ -311,6 +317,8 @@ export class ZaiAdapter {
           },
           timeout: 30000,
           validateStatus: () => true,
+          proxy: false,
+          httpsAgent,
         }
       )
 
@@ -509,6 +517,7 @@ export class ZaiAdapter {
       signature_timestamp: String(timestamp),
     })
 
+    const proxyConfig = getProxyConfig()
     const response = await axios.post(
       `${ZAI_API_BASE}/api/v2/chat/completions?${queryParams.toString()}`,
       requestBody,
@@ -521,21 +530,21 @@ export class ZaiAdapter {
           'Content-Type': 'application/json',
           'X-Signature': signature,
           'X-FE-Version': X_FE_VERSION,
-          'Cookie': `token=${token}`,
           Origin: ZAI_API_BASE,
           Referer: `${ZAI_API_BASE}/c/${chatId}`,
           'Sec-Fetch-Dest': 'empty',
           'Sec-Fetch-Mode': 'cors',
           'Sec-Fetch-Site': 'same-origin',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
           'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
           'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"macOS"',
+          'sec-ch-ua-platform': '"Windows"',
           Priority: 'u=1, i',
         },
         responseType: 'stream',
         timeout: 120000,
         validateStatus: () => true,
+        ...proxyConfig,
       }
     )
 
