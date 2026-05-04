@@ -4,6 +4,7 @@
  */
 
 import axios from 'axios'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { shell } from 'electron'
 import { BaseOAuthAdapter } from './base'
 import {
@@ -17,25 +18,37 @@ import {
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com'
 
+// 获取系统代理配置
+function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+  if (proxyUrl) {
+    return new HttpsProxyAgent(proxyUrl)
+  }
+  return undefined
+}
+
 const FAKE_HEADERS = {
-  Accept: '*/*',
+  'Accept': '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
-  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  Origin: DEEPSEEK_API_BASE,
-  Pragma: 'no-cache',
-  Priority: 'u=1, i',
-  Referer: `${DEEPSEEK_API_BASE}/`,
-  'Sec-Ch-Ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Content-Type': 'application/json',
+  'DNT': '1',
+  'Origin': DEEPSEEK_API_BASE,
+  'Priority': 'u=1, i',
+  'Referer': `${DEEPSEEK_API_BASE}/`,
+  'Sec-Ch-Ua': '"Not)A;Brand";v="8", "Chromium";v="138"',
   'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+  'Sec-GPC': '1',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
   'X-App-Version': '20241129.1',
-  'X-Client-Locale': 'zh-CN',
+  'X-Client-Locale': 'zh_CN',
   'X-Client-Platform': 'web',
-  'X-Client-Version': '1.6.1',
+  'X-Client-Timezone-Offset': '28800',
+  'X-Client-Version': '2.0.0',
 }
 
 export class DeepSeekAdapter extends BaseOAuthAdapter {
@@ -130,41 +143,71 @@ export class DeepSeekAdapter extends BaseOAuthAdapter {
    * Validate token validity
    */
   async validateToken(credentials: Record<string, string>): Promise<TokenValidationResult> {
-    const token = credentials.token || credentials.userToken
+    const rawToken = credentials.token || credentials.userToken
     
-    if (!token) {
+    if (!rawToken) {
       return {
         valid: false,
         error: 'Token cannot be empty',
       }
     }
     
+    // 处理token格式：可能是JSON对象 {"value":"xxx","__version":"0"} 或纯字符串
+    let token = rawToken
     try {
-      const response = await axios.get(`${DEEPSEEK_API_BASE}/api/v0/users/current`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...FAKE_HEADERS,
-        },
+      const parsed = JSON.parse(rawToken)
+      if (parsed && parsed.value) {
+        token = parsed.value
+        console.log('[DeepSeek OAuth] Extracted token from JSON object')
+      }
+    } catch {
+      // token是纯字符串，直接使用
+    }
+    
+    try {
+      const url = `${DEEPSEEK_API_BASE}/api/v0/chat_session/create`
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        ...FAKE_HEADERS,
+      }
+      
+      console.log('[DeepSeek OAuth] ========== Validate Token Request ==========')
+      console.log('[DeepSeek OAuth] URL:', url)
+      console.log('[DeepSeek OAuth] Method: POST')
+      console.log('[DeepSeek OAuth] Headers:', JSON.stringify(headers, null, 2))
+      console.log('[DeepSeek OAuth] ================================================')
+      
+      const httpsAgent = getHttpsProxyAgent()
+      const response = await axios.post(url, {}, {
+        headers,
         timeout: 15000,
         validateStatus: () => true,
+        proxy: false,
+        httpsAgent,
       })
       
-      console.log('[DeepSeek OAuth] Response:', response.status, response.data)
+      console.log('[DeepSeek OAuth] ========== Validate Token Response ==========')
+      console.log('[DeepSeek OAuth] Status:', response.status)
+      console.log('[DeepSeek OAuth] Data:', JSON.stringify(response.data, null, 2))
+      console.log('[DeepSeek OAuth] =================================================')
       
-      if (response.status !== 200 || !response.data) {
+      // 如果返回200且code为0，说明token有效
+      if (response.status === 200 && response.data?.code === 0) {
         return {
-          valid: false,
-          error: 'Token is invalid or expired',
+          valid: true,
+          tokenType: 'access',
+          accountInfo: {
+            userId: 'deepseek-user',
+            email: '',
+            name: 'DeepSeek User',
+          },
         }
       }
       
-      // DeepSeek API returns: { code: 0, msg: '', data: { biz_code: 0, biz_msg: '', biz_data: { ... } } }
-      const bizData = response.data?.data?.biz_data
-      
-      if (!bizData) {
+      if (response.status === 401 || response.status === 403) {
         return {
           valid: false,
-          error: 'Token validation failed: Invalid response data',
+          error: 'Token is invalid or expired',
         }
       }
       
@@ -172,9 +215,9 @@ export class DeepSeekAdapter extends BaseOAuthAdapter {
         valid: true,
         tokenType: 'access',
         accountInfo: {
-          userId: bizData.id,
-          email: bizData.email,
-          name: bizData.name,
+          userId: 'deepseek-user',
+          email: '',
+          name: 'DeepSeek User',
         },
       }
     } catch (error) {

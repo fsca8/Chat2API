@@ -1,9 +1,20 @@
 import axios, { AxiosError } from 'axios'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { getBuiltinProvider } from './builtin'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
 const CHECK_TIMEOUT = 15000
+
+// 获取系统代理配置
+function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+  if (proxyUrl) {
+    console.log('[Proxy] Using proxy:', proxyUrl)
+    return new HttpsProxyAgent(proxyUrl)
+  }
+  return undefined
+}
 
 export interface TokenCheckResult {
   valid: boolean
@@ -180,39 +191,69 @@ export class ProviderChecker {
 
   private static async checkDeepSeekToken(token: string): Promise<TokenCheckResult> {
     try {
-      console.log('[DeepSeek] Validating Token:', token.substring(0, 20) + '...')
-      
-      const response = await axios.get(
-        'https://chat.deepseek.com/api/v0/users/current',
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': '*/*',
-            'Origin': 'https://chat.deepseek.com',
-            'Referer': 'https://chat.deepseek.com/',
-          },
-          timeout: CHECK_TIMEOUT,
-          validateStatus: () => true,
+      // 处理token格式：可能是JSON对象 {"value":"xxx","__version":"0"} 或纯字符串
+      let actualToken = token
+      try {
+        const parsed = JSON.parse(token)
+        if (parsed && parsed.value) {
+          actualToken = parsed.value
+          console.log('[DeepSeek] Extracted token from JSON object')
         }
-      )
+      } catch {
+        // token是纯字符串，直接使用
+      }
+      
+      console.log('[DeepSeek] Validating Token:', actualToken.substring(0, 20) + '...')
+      
+      const url = 'https://chat.deepseek.com/api/v0/chat_session/create'
+      const headers = {
+        Authorization: `Bearer ${actualToken}`,
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'Content-Type': 'application/json',
+        'DNT': '1',
+        'Origin': 'https://chat.deepseek.com',
+        'Priority': 'u=1, i',
+        'Referer': 'https://chat.deepseek.com/',
+        'Sec-Ch-Ua': '"Not)A;Brand";v="8", "Chromium";v="138"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-GPC': '1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+        'X-App-Version': '20241129.1',
+        'X-Client-Locale': 'zh_CN',
+        'X-Client-Platform': 'web',
+        'X-Client-Timezone-Offset': '28800',
+        'X-Client-Version': '2.0.0',
+      }
+      
+      const httpsAgent = getHttpsProxyAgent()
+      const response = await axios.post(url, {}, {
+        headers,
+        timeout: CHECK_TIMEOUT,
+        validateStatus: () => true,
+        proxy: false,
+        httpsAgent,
+      })
       
       console.log('[DeepSeek] Response status:', response.status)
       console.log('[DeepSeek] Response data:', JSON.stringify(response.data, null, 2))
       
-      // Response format: { code: 0, data: { biz_data: { ... } } }
-      if (response.status === 200 && response.data?.code === 0 && response.data?.data?.biz_data) {
-        const bizData = response.data.data.biz_data
+      // 如果返回200且code为0，说明token有效
+      if (response.status === 200 && response.data?.code === 0) {
         return {
           valid: true,
           userInfo: {
-            name: bizData.id_profile?.name,
-            email: bizData.email,
+            name: 'DeepSeek User',
           },
         }
       }
       
-      if (response.status === 401 || response.data?.code === 40003 || response.data?.data?.biz_code === 40003) {
+      if (response.status === 401 || response.status === 403) {
         return { valid: false, error: 'Token expired or invalid' }
       }
       

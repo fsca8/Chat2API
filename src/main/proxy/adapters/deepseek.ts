@@ -7,30 +7,44 @@
  */
 
 import axios, { AxiosResponse } from 'axios'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { getDeepSeekHash } from '../../lib/challenge'
 import { Account, Provider } from '../store/types'
 import { storeManager } from '../store/store'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
 
+// 获取系统代理配置
+function getHttpsProxyAgent(): HttpsProxyAgent | undefined {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+  if (proxyUrl) {
+    return new HttpsProxyAgent(proxyUrl)
+  }
+  return undefined
+}
+
 const FAKE_HEADERS = {
-  Accept: '*/*',
+  'Accept': '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
-  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-  Origin: 'https://chat.deepseek.com',
-  Referer: 'https://chat.deepseek.com/',
-  'Sec-Ch-Ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Content-Type': 'application/json',
+  'DNT': '1',
+  'Origin': 'https://chat.deepseek.com',
+  'Priority': 'u=1, i',
+  'Referer': 'https://chat.deepseek.com/',
+  'Sec-Ch-Ua': '"Not)A;Brand";v="8", "Chromium";v="138"',
   'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
+  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+  'Sec-GPC': '1',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
   'X-App-Version': '20241129.1',
-  'X-Client-Locale': 'zh-CN',
+  'X-Client-Locale': 'zh_CN',
   'X-Client-Platform': 'web',
-  'x-Client-Timezone-Offset': '28800',
-  'X-Client-Version': '1.8.0',
+  'X-Client-Timezone-Offset': '28800',
+  'X-Client-Version': '2.0.0',
 }
 
 interface TokenInfo {
@@ -110,7 +124,22 @@ export class DeepSeekAdapter {
     this.provider = provider
     this.account = account
     console.log('[DeepSeek] Account credentials:', JSON.stringify(account.credentials, null, 2))
-    this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
+    
+    const rawToken = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
+    
+    // 处理token格式：可能是JSON对象 {"value":"xxx","__version":"0"} 或纯字符串
+    let token = rawToken
+    try {
+      const parsed = JSON.parse(rawToken)
+      if (parsed && parsed.value) {
+        token = parsed.value
+        console.log('[DeepSeek] Extracted token from JSON object')
+      }
+    } catch {
+      // token是纯字符串，直接使用
+    }
+    
+    this.token = token
     console.log('[DeepSeek] Using token:', this.token.substring(0, 20) + '...')
   }
 
@@ -119,49 +148,9 @@ export class DeepSeekAdapter {
       throw new Error('DeepSeek Token not configured, please add Token in account settings')
     }
 
-    const cached = tokenCache.get(this.token)
-    if (cached && cached.expiresAt > unixTimestamp()) {
-      return cached.accessToken
-    }
-
-    console.log('[DeepSeek] Acquiring token...')
-    
-    const result = await axios.get(`${DEEPSEEK_API_BASE}/v0/users/current`, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        ...FAKE_HEADERS,
-      },
-      timeout: 15000,
-      validateStatus: () => true,
-    })
-
-    console.log('[DeepSeek] Token response status:', result.status)
-    
-    if (result.status === 401 || result.status === 403) {
-      throw new Error(`Token invalid or expired, please get a new Token`)
-    }
-
-    if (result.status !== 200) {
-      throw new Error(`Failed to acquire token: HTTP ${result.status}`)
-    }
-
-    // Response structure: { code: 0, data: { biz_code: 0, biz_data: { token: "..." } } }
-    const bizData = result.data?.data?.biz_data || result.data?.biz_data
-    if (!bizData?.token) {
-      const errorMsg = result.data?.msg || result.data?.data?.biz_msg || 'Unknown error'
-      console.log('[DeepSeek] Token response data:', JSON.stringify(result.data, null, 2))
-      throw new Error(`Failed to acquire token: ${errorMsg}`)
-    }
-
-    const accessToken = bizData.token
-    tokenCache.set(this.token, {
-      accessToken,
-      refreshToken: this.token,
-      expiresAt: unixTimestamp() + 3600,
-    })
-
-    console.log('[DeepSeek] Token acquired successfully')
-    return accessToken
+    // 直接返回用户配置的token
+    console.log('[DeepSeek] Using configured token')
+    return this.token
   }
 
   private async createSession(): Promise<string> {
@@ -172,6 +161,7 @@ export class DeepSeekAdapter {
     }
 
     const token = await this.acquireToken()
+    const httpsAgent = getHttpsProxyAgent()
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat_session/create`,
       {},
@@ -183,6 +173,8 @@ export class DeepSeekAdapter {
         },
         timeout: 15000,
         validateStatus: () => true,
+        proxy: false,
+        httpsAgent,
       }
     )
 
@@ -203,6 +195,7 @@ export class DeepSeekAdapter {
   async deleteSession(sessionId: string): Promise<boolean> {
     try {
       const token = await this.acquireToken()
+      const httpsAgent = getHttpsProxyAgent()
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete`,
         { chat_session_id: sessionId },
@@ -213,6 +206,8 @@ export class DeepSeekAdapter {
           },
           timeout: 15000,
           validateStatus: () => true,
+          proxy: false,
+          httpsAgent,
         }
       )
 
@@ -234,6 +229,7 @@ export class DeepSeekAdapter {
 
   private async getChallenge(targetPath: string): Promise<ChallengeResponse> {
     const token = await this.acquireToken()
+    const httpsAgent = getHttpsProxyAgent()
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/create_pow_challenge`,
       { target_path: targetPath },
@@ -244,6 +240,8 @@ export class DeepSeekAdapter {
         },
         timeout: 15000,
         validateStatus: () => true,
+        proxy: false,
+        httpsAgent,
       }
     )
 
@@ -420,6 +418,7 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
+    const httpsAgent = getHttpsProxyAgent()
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
@@ -440,6 +439,8 @@ ${message.content || ''}
         timeout: 120000,
         validateStatus: () => true,
         responseType: 'stream',
+        proxy: false,
+        httpsAgent,
       }
     )
 
@@ -449,6 +450,7 @@ ${message.content || ''}
   async deleteAllChats(): Promise<boolean> {
     try {
       const token = await this.acquireToken()
+      const httpsAgent = getHttpsProxyAgent()
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete_all`,
         {},
@@ -459,6 +461,8 @@ ${message.content || ''}
           },
           timeout: 30000,
           validateStatus: () => true,
+          proxy: false,
+          httpsAgent,
         }
       )
 
