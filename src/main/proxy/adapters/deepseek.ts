@@ -370,7 +370,10 @@ export class DeepSeekAdapter {
 
     let prompt = this.messagesToPrompt(messages, false)
 
-    const { modelType, searchEnabled, thinkingEnabled } = resolveDeepSeekChatOptions(request, prompt)
+    const resolvedOptions = resolveDeepSeekChatOptions(request, prompt)
+    let modelType = resolvedOptions.modelType
+    let searchEnabled = resolvedOptions.searchEnabled
+    let thinkingEnabled = resolvedOptions.thinkingEnabled
 
     if (request.web_search || request.model.toLowerCase().includes('search')) {
       console.log('[DeepSeek] Web search enabled')
